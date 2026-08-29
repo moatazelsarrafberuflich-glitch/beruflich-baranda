@@ -1,0 +1,7 @@
+project_id = "hgwwmdhndczfqwdulird"
+# LiveKit calls this directly (server-to-server), authenticated by its own
+# signed-webhook scheme — not a Supabase user JWT — so JWT verification
+# must be off for this function specifically. All other functions keep the
+# default (JWT-verified).
+[functions.livekit-webhook]
+verify_jwt = false
