@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { router } from "expo-router";
 import {
-  View, Text, Pressable, StyleSheet, ActivityIndicator, Animated, Easing,
+  View, Text, Pressable, StyleSheet, ActivityIndicator, Animated, Easing, Alert,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -15,11 +15,6 @@ const SKIP_KEY = "diarino:skip_auth"; // ↔ SKIP_KEY/sessionStorage in the orig
 const INTRO_DURATION_MS = 1600;
 
 export default function AuthGateScreen() {
-  // ↔ "صفحة افتتاحية يظهر بها شعار التطبيق" — a distinct opening screen
-  // shown first, before either the loading spinner or the login form,
-  // regardless of how long session-checking takes (the login screen
-  // already had a logo+skyline treatment of its own; this is a separate,
-  // deliberately brief first impression, not a reskin of that screen).
   const [showIntro, setShowIntro] = useState(true);
   const [loading, setLoading] = useState(true);
   const [hasSession, setHasSession] = useState(false);
@@ -41,11 +36,6 @@ export default function AuthGateScreen() {
 
     AsyncStorage.getItem(SKIP_KEY).then(async (v) => {
       if (!mounted || v !== "1") return;
-      // A guest flag from a previous session, but with no live Supabase
-      // session (e.g. it expired, or this flag predates the anonymous-auth
-      // fix above) — silently upgrade it to a real anonymous session so
-      // RLS-protected reads keep working instead of the guest seeing an
-      // empty app.
       if (!getAuthSnapshot().user) {
         await signInAsGuest().catch(() => {});
       }
@@ -70,8 +60,6 @@ export default function AuthGateScreen() {
     return () => { mounted = false; unsubscribe(); };
   }, [authLoading, currentUser]);
 
-  // ↔ the `if (!session && !skipped) return <LoginScreen/>` branch — once
-  // either is true, hand off to the tab shell instead of an iframe src swap.
   useEffect(() => {
     if (loading || (!hasSession && !skipped)) return;
 
@@ -99,9 +87,20 @@ export default function AuthGateScreen() {
   async function handleGoogleSignIn() {
     setSigningIn(true);
     setError(null);
-    const { error: err } = await signInWithGoogle();
-    setSigningIn(false);
-    if (err) setError(err);
+    try {
+      const { error: err } = await signInWithGoogle();
+      if (err) {
+        const errorMsg = typeof err === "object" ? JSON.stringify(err, Object.getOwnPropertyNames(err)) : String(err);
+        setError(errorMsg);
+        Alert.alert("خطأ في تسجيل الدخول", errorMsg);
+      }
+    } catch (err: any) {
+      const errorMsg = err?.message || JSON.stringify(err, Object.getOwnPropertyNames(err));
+      setError(errorMsg);
+      Alert.alert("خطأ في تسجيل الدخول", errorMsg);
+    } finally {
+      setSigningIn(false);
+    }
   }
 
   async function handleSkip() {
@@ -130,7 +129,7 @@ export default function AuthGateScreen() {
   }
 
   if (hasSession || skipped) {
-    return <View style={styles.loadingContainer} />; // brief flash before the replace() above lands
+    return <View style={styles.loadingContainer} />;
   }
 
   return (
@@ -138,10 +137,6 @@ export default function AuthGateScreen() {
   );
 }
 
-// ↔ the standalone opening screen — the Diarino logo on an office wall,
-// as approved in the brand photo, filling the screen with a soft fade-in,
-// auto-dismissing after INTRO_DURATION_MS (see the timer in AuthGateScreen
-// above). Same image also powers the native cold-start splash (app.json).
 function IntroSplash() {
   const opacity = useRef(new Animated.Value(0)).current;
   const themeColors = useThemeColors();
@@ -162,12 +157,6 @@ function IntroSplash() {
   );
 }
 
-// ↔ redesigned to match the new brand photo (assets/logo-mark.png — the
-// same navy/gold "D" mark + wordmark cropped out of the intro splash
-// image, background stripped of the plant/office so it reads cleanly on
-// its own) instead of the old dark night-skyline treatment, so the
-// hand-off from IntroSplash into this screen feels like one continuous
-// identity rather than two different apps.
 function LoginScreen({
   onGoogle, onSkip, signingIn, signingInGuest, error,
 }: { onGoogle: () => void; onSkip: () => void; signingIn: boolean; signingInGuest: boolean; error: string | null }) {
@@ -235,18 +224,6 @@ function GoogleIcon() {
   );
 }
 
-// ↔ الوضع الداكن (إغلاق الملف — بدون استثناء): خلفية التدرّج (gradient)
-// وألوان النصوص بتتبدّل مع الثيم — نسخة داكنة متناسقة مع هوية العلامة
-// (نفس درجة الأزرق الكحلي #14293C المستخدمة أصلاً فى النص، بس كخلفية
-// دلوقتي) بدل ما تفضل ثابتة على الوضع الفاتح دايمًا.
-//
-// ⚠️ استثناء واحد مبرَّر: زرار "المتابعة باستخدام جوجل" (`googleBtn`)
-// فضل خلفيته بيضا ثابتة فى الوضعين — ده مش تفضيل تصميمي مننا، ده شرط من
-// إرشادات العلامة التجارية الرسمية لـ Google لأزرار تسجيل الدخول
-// (Google Sign-In Branding Guidelines) اللي بتوجب استخدام الزرار الأبيض
-// القياسي أو الأسود القياسي بس، مش أي لون تاني — نفس السبب اللي خلى
-// شعارات/أزرار "Sign in with Apple" فى تطبيقات تانية بتفضل بألوانها
-// المحددة برضه بغض النظر عن ثيم التطبيق المضيف.
 function createStyles(themeColors: ThemeColors) {
   return StyleSheet.create({
     loadingContainer: { flex: 1, backgroundColor: themeColors.isDark ? "#0F1B28" : "#B6BEAF", alignItems: "center", justifyContent: "center" },
