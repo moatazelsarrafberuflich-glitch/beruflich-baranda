@@ -1,3 +1,4 @@
+import { Platform } from "react-native";
 import * as AuthSession from "expo-auth-session";
 import * as WebBrowser from "expo-web-browser";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -7,7 +8,7 @@ import { resetAdminDB } from "./useAdminDB";
 import { clearCompareSelection } from "./useCompareSelection";
 import { getAuthSnapshot } from "./useCurrentUser";
 
-const SKIP_KEY = "diarino:skip_auth"; // must match app/index.tsx
+const SKIP_KEY = "diarino:skip_auth";
 
 let callbackSessionPromise: Promise<{ error: string | null }> | null = null;
 let callbackUrl: string | null = null;
@@ -21,7 +22,6 @@ export function consumeIntentionalSignOut(): boolean {
 
 WebBrowser.maybeCompleteAuthSession();
 
-// ↔ translateOAuthError() — same error-message mapping, ported as-is.
 export function translateOAuthError(raw: string): string {
   const m = raw.toLowerCase();
   if (m.includes("popup") && m.includes("closed")) return "تم إغلاق نافذة تسجيل الدخول قبل إتمام العملية.";
@@ -70,35 +70,54 @@ async function completeOAuthCallbackOnce(rawUrl: string): Promise<{ error: strin
   return { error: translateOAuthError(errorDescription || "") };
 }
 
+export function getOAuthRedirectUri(): string {
+  if (Platform.OS === "web" && typeof window !== "undefined" && window.location?.origin) {
+    return `${window.location.origin}/auth-callback`;
+  }
+
+  return AuthSession.makeRedirectUri({
+    scheme: "diarino",
+    path: "auth-callback",
+    preferLocalhost: false,
+  });
+}
+
 export async function signInWithGoogle(): Promise<{ error: string | null }> {
-  // In a browser, always return to the current web origin. The custom
-  // diarino:// scheme is only handled by an installed native build.
-  const isWeb = typeof window !== "undefined";
-  const redirectUri = isWeb
-    ? `${window.location.origin}/auth-callback`
-    : AuthSession.makeRedirectUri({ scheme: "diarino", path: "auth-callback" });
+  const isWeb = Platform.OS === "web";
+  const redirectUri = getOAuthRedirectUri();
 
   // 1. التعامل مع بيئة الويب (Web)
-  if (isWeb) {
+  if (isWeb && typeof window !== "undefined") {
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
         redirectTo: redirectUri,
-        skipBrowserRedirect: false, // تحويل مباشر في المتصفح دون تعليق
+        skipBrowserRedirect: false,
+        queryParams: {
+          access_type: "offline",
+          prompt: "consent",
+        },
       },
     });
 
     if (error) return { error: translateOAuthError(error.message) };
     if (data?.url) {
-      window.location.href = data.url; // التوجيه الفوري لصفحة Google
+      window.location.href = data.url;
     }
     return { error: null };
   }
 
-  // 2. التعامل مع تطبيقات الهاتف (Native)
+  // 2. التعامل مع تطبيقات الموبايل والـ APK (Android / iOS)
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "google",
-    options: { redirectTo: redirectUri, skipBrowserRedirect: true },
+    options: {
+      redirectTo: redirectUri,
+      skipBrowserRedirect: true,
+      queryParams: {
+        access_type: "offline",
+        prompt: "consent",
+      },
+    },
   });
 
   if (error || !data?.url) {
@@ -118,8 +137,8 @@ export async function signInWithGoogle(): Promise<{ error: string | null }> {
     const { data: profile } = await supabase.from("profiles").select("full_name").eq("id", uid).maybeSingle();
     supabase.from("user_activity_log").insert({
       user_id: uid, user_name: profile?.full_name ?? null, activity_type: "login",
-    }).then(({ error }) => {
-      if (error) console.warn("Failed to log login activity:", error);
+    }).then(({ error: logErr }) => {
+      if (logErr) console.warn("Failed to log login activity:", logErr);
     });
   }
 
@@ -135,11 +154,8 @@ export async function signInAsGuest(): Promise<{ error: string | null }> {
 export async function signOut(): Promise<void> {
   intentionalSignOut = true;
   try {
-    // A local sign-out must not wait for the network. Global revocation can
-    // be rate-limited by Supabase and would leave the settings button stuck.
     await supabase.auth.signOut({ scope: "local" });
   } catch {
-    // Clear the local session even when the auth request fails.
     try { await supabase.auth.signOut({ scope: "local" }); } catch { /* ignore */ }
   }
   await AsyncStorage.removeItem(SKIP_KEY).catch(() => {});

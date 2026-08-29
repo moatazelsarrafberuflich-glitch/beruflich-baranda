@@ -92,6 +92,9 @@
       "bundleIdentifier": "com.diarino.app",
       "buildNumber": "1",
       "supportsTablet": false,
+      "associatedDomains": [
+        "applinks:diarino.app"
+      ],
       "infoPlist": {
         "NSCameraUsageDescription": "يحتاج ديارينو للوصول إلى الكاميرا لبدء بث مباشر لعقارك.",
         "NSMicrophoneUsageDescription": "يحتاج ديارينو للوصول إلى الميكروفون أثناء البث المباشر ولتسجيل الفيديوهات.",
@@ -104,6 +107,13 @@
           "twitter",
           "telegram",
           "tiktok"
+        ],
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLSchemes": [
+              "diarino"
+            ]
+          }
         ]
       },
       "bitcode": false
@@ -111,6 +121,27 @@
     "android": {
       "package": "com.diarino.app",
       "versionCode": 1,
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "diarino",
+              "host": "auth-callback"
+            },
+            {
+              "scheme": "https",
+              "host": "diarino.app",
+              "pathPrefix": "/auth-callback"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#B6BEAF"
