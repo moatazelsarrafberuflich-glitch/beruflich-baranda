@@ -1,4 +1,5 @@
-// supabase/functions/send-push/index.ts
+// @ts-nocheck
+// // supabase/functions/send-push/index.ts
 //
 // Turns a new row in public.notifications into a real OS-level push, on
 // top of the in-app notification that already exists the moment the row

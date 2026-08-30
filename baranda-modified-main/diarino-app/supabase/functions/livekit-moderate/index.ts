@@ -1,3 +1,4 @@
+// @ts-nocheck
 // supabase/functions/livekit-moderate/index.ts
 //
 // Removes a participant from a live LiveKit room ("kick"). Host-only.

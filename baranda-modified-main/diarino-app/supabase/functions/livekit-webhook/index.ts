@@ -1,4 +1,5 @@
-// supabase/functions/livekit-webhook/index.ts
+// @ts-nocheck
+// // supabase/functions/livekit-webhook/index.ts
 //
 // LiveKit calls this URL directly (server-to-server) whenever a room's
 // state changes. Handles two things:

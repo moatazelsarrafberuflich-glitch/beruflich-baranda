@@ -107,6 +107,19 @@ export default function AccountScreen() {
     setBioModalVisible(false);
   }
 
+  // دالة تشغيل إعادة اللايف المعالجة والتوافقية مع الويب والـ APK و iOS
+  const handleOpenLiveReplay = (live: SavedLive) => {
+    // التوجه للايف إذا كان الرابط موجوداً أو الحالة خالية/جاهزة
+    if (live.recordingUrl || live.recordingStatus === "ready" || !live.recordingStatus) {
+      router.push({
+        pathname: "/live/replay/[id]",
+        params: { id: live.id }
+      });
+    } else {
+      setLiveSheetTarget(live);
+    }
+  };
+
   return (
     <View style={styles.container}>
       <PageTopBar
@@ -234,13 +247,7 @@ export default function AccountScreen() {
                   <Pressable
                     key={live.id}
                     style={styles.myAdCell}
-                    onPress={() => {
-                      if (live.recordingStatus === "ready" && live.recordingUrl) {
-                        router.push(`/live/replay/${live.id}`);
-                      } else {
-                        setLiveSheetTarget(live);
-                      }
-                    }}
+                    onPress={() => handleOpenLiveReplay(live)}
                     onLongPress={() => setLiveSheetTarget(live)}
                   >
                     {live.posterUrl ? (
@@ -256,7 +263,7 @@ export default function AccountScreen() {
                     {live.recordingStatus === "failed" && (
                       <View style={styles.failedBadge}><Text style={styles.processingBadgeText}>{t("فشل التسجيل")}</Text></View>
                     )}
-                    {live.recordingStatus === "ready" && (
+                    {(live.recordingStatus === "ready" || !!live.recordingUrl) && (
                       <View style={styles.playIconWrap}>
                         <Svg width={22} height={22} viewBox="0 0 24 24" fill="white"><Path d="M8 5v14l11-7z" /></Svg>
                       </View>

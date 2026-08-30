@@ -5,7 +5,7 @@ export default function LiveLayout() {
     <Stack screenOptions={{ headerShown: false, presentation: "fullScreenModal" }}>
       <Stack.Screen name="broadcast" />
       <Stack.Screen name="[id]" />
-      <Stack.Screen name="replay/[id]" />
+      <Stack.Screen name="replay/[id]" options={{ presentation: "modal" }} />
     </Stack>
   );
 }

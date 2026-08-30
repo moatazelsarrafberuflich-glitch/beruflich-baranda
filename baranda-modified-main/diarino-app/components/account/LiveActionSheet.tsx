@@ -25,8 +25,6 @@ export function LiveActionSheet({ visible, live, onClose }: Props) {
   const [confirmComments, setConfirmComments] = useState(false);
   if (!live) return null;
 
-  // ↔ posterUrl previously only ever held a local file:// URI, then
-  // uploaded to Supabase Storage — now uploads straight to Cloudinary.
   async function pickPoster() {
     if (!user?.id) return;
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -47,6 +45,14 @@ export function LiveActionSheet({ visible, live, onClose }: Props) {
     }
   }
 
+  const handleWatchReplay = () => {
+    onClose(); // إغلاق الـ Sheet أولاً قبل الانتقال
+    router.push({
+      pathname: "/live/replay/[id]",
+      params: { id: live.id },
+    });
+  };
+
   const items: ActionSheetItem[] = [
     {
       key: "watch",
@@ -56,7 +62,7 @@ export function LiveActionSheet({ visible, live, onClose }: Props) {
         : t("فشل التسجيل"),
       disabled: live.recordingStatus !== "ready",
       icon: (p) => <Path {...p} d="M8 5v14l11-7z" />,
-      onPress: () => router.push(`/live/replay/${live.id}`),
+      onPress: handleWatchReplay,
     },
     {
       key: "poster",

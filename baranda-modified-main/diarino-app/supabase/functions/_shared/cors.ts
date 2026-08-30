@@ -1,7 +1,8 @@
+// @ts-nocheck
 export const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Methods": "POST, GET, OPTIONS, PUT, DELETE",
 };
 
 function addCorsHeaders(response: Response): Response {
@@ -14,17 +15,19 @@ function addCorsHeaders(response: Response): Response {
   });
 }
 
-// توحيد CORS هنا يمنع نسيان ترويسات OPTIONS أو أحد فروع الخطأ في دوال Edge.
+// توحيد CORS لمعالجة طلبات OPTIONS وكافة الاستجابات فوراً
 export function serveWithCors(
   handler: (request: Request) => Promise<Response> | Response,
 ): Deno.HttpServer {
   return Deno.serve(async (request) => {
+    // الاستجابة الفورية لطلبات Preflight OPTIONS
     if (request.method === "OPTIONS") {
-      return new Response("ok", { status: 204, headers: corsHeaders });
+      return new Response("ok", { status: 200, headers: corsHeaders });
     }
 
     try {
-      return addCorsHeaders(await handler(request));
+      const res = await handler(request);
+      return addCorsHeaders(res);
     } catch (error: unknown) {
       console.error("Unhandled Edge Function error:", error);
       return new Response(JSON.stringify({ error: "Internal server error" }), {

@@ -23,27 +23,21 @@ import { useCurrentUser } from "../../lib/hooks/useCurrentUser";
 import { useLanguage } from "../../lib/hooks/useLanguage";
 import { useThemeColors, ThemeColors } from "../../lib/hooks/useThemeColors";
 
-// `id` here is actually the LiveKit room_name (see createLiveRoom in
-// lib/livekit.ts) — kept as the param name since that's what the route
-// file is called, but it's used to look up the real `lives` row below.
+// تحويل بروتوكول HTTP إلى WSS لضمان توافق اتصالات WebSockets على الموبايل والـ APK
+function formatLiveKitUrl(url: string | undefined): string {
+  if (!url) return "";
+  return url.replace(/^https:\/\//, "wss://");
+}
+
 export default function LiveViewerScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { displayName } = useCurrentUser();
   const { t } = useLanguage();
   const themeColors = useThemeColors();
   const styles = createStyles(themeColors);
-  // Every broadcast is recorded from the moment it goes live (see
-  // startRecording() in app/live/broadcast.tsx, called unconditionally
-  // right after connect) — so a viewer is *always* joining a session
-  // that's being recorded, never sometimes. This gate is shown before
-  // anything else on this screen: no token fetch, no room connect, no
-  // media, until the viewer taps "موافق". "رجوع" is the only way out
-  // besides agreeing — there's no dismiss/skip/X on this screen.
+
   const [consentGiven, setConsentGiven] = useState(false);
   const { info, error, ready } = useLiveKitToken(consentGiven ? id : "");
-  // ↔ replaces trusting title/sellerName query params — this is a real
-  // lookup of the `lives` row, which also gives the follow button an
-  // actual seller id to act on (the params-only version had none).
   const { data: liveMeta } = useLiveByRoomName(id);
 
   if (!consentGiven) {
@@ -78,7 +72,21 @@ export default function LiveViewerScreen() {
   if (!ready || !info) return <View style={styles.center} />;
 
   return (
-    <LiveKitRoom serverUrl={info.url} token={info.token} connect video={false} audio={false}>
+    <LiveKitRoom 
+      serverUrl={formatLiveKitUrl(info.url)} 
+      token={info.token} 
+      connect 
+      video={false} 
+      audio={false}
+      options={{
+        adaptiveStream: true,
+        dynacast: true,
+      }}
+      onError={(err) => {
+        console.error("LiveKit Viewer Connection Error:", err);
+        Alert.alert(t("خطأ في الاتصال"), t("تعذر الاتصال بسيرفر البث المباشر."));
+      }}
+    >
       <ViewerLiveView
         roomName={id}
         liveId={liveMeta?.id}
@@ -100,8 +108,6 @@ function ViewerLiveView({
   const participants = useParticipants();
   const tracks = useTracks([Track.Source.Camera]);
 
-  // Type Guard لتأمين النوع بدون any
- // Type Guard صريح ينفي أي خطأ implicit any
   const remoteTrackRef = tracks.find(
     (trackRef: typeof tracks[number]): trackRef is typeof trackRef & { participant: { isLocal: boolean } } =>
       isTrackReference(trackRef) && !trackRef.participant.isLocal
@@ -116,11 +122,6 @@ function ViewerLiveView({
     return () => { AudioSession.stopAudioSession(); };
   }, []);
 
-  // Host removed this viewer via the "kick" control in livekit-moderate.
-  // RoomEvent.Disconnected only fires on a *final* disconnect (not on the
-  // transient reconnect attempts LiveKit handles internally), so this is
-  // specifically "kicked", not "flaky network" — hence the dedicated
-  // message rather than silently dropping them back to the previous screen.
   useEffect(() => {
     if (!room) return;
     const onDisconnected = (reason?: DisconnectReason) => {
@@ -219,12 +220,6 @@ function ViewerLiveView({
   );
 }
 
-// ↔ قاعدة تثيم الوسائط (نسخة نهائية معتمدة — docs/deferred-tasks.md):
-// styles العادية دي (module-level، ثابتة) خاصة بـ ViewerLiveView — كل
-// حاجة فيها مرسومة مباشرة فوق سطح الفيديو أو هي سطح الفيديو نفسه
-// (container/video/topBar/sideActions/الأزرار...) فتفضل ثابتة بغض النظر
-// عن الثيم، بالظبط زي الريلز. createStyles(themeColors) تحت خاصة بشاشات
-// "قبل الانضمام" (الموافقة/الخطأ/التحميل) اللي مفيش فيها فيديو أصلاً.
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#000" },
   recPill: { backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 999, paddingVertical: 4, paddingHorizontal: 10 },
@@ -249,8 +244,6 @@ const styles = StyleSheet.create({
   actionBtn: { alignItems: "center", justifyContent: "center" },
 });
 
-// ↔ يتبع الثيم — شاشات ما قبل الانضمام (موافقة/خطأ/تحميل)، مفيش فيديو
-// ظاهر لحظتها أصلاً.
 function createStyles(themeColors: ThemeColors) {
   return StyleSheet.create({
     center: { flex: 1, backgroundColor: themeColors.background, alignItems: "center", justifyContent: "center", gap: 16 },

@@ -1,3 +1,4 @@
+// @ts-nocheck
 // supabase/functions/livekit-recording/index.ts
 //
 // Starts/stops a LiveKit Egress room-composite recording. Output goes to

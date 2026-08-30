@@ -4,44 +4,53 @@ import { useMyContent } from "./useMyContent";
 
 const POLL_MS = 5000;
 
-// Bridges "broadcaster tapped إنهاء" (recording_status → 'processing'
-// immediately, client-side) and "Egress actually finished uploading"
-// (recording_status → 'ready'/'failed', set server-side by the
-// livekit-webhook's egress_ended handler, asynchronously). Realtime would
-// be the cleaner way to catch this, but that needs the `lives` table added
-// to a Supabase realtime publication as a separate setup step — polling is
-// simpler here and doesn't depend on that being configured.
-//
-// Called once (e.g. at the top of the account screen), not per-item —
-// iterates whatever's currently 'processing' on every tick, so it's safe
-// regardless of how many recordings are in flight or how that number
-// changes between renders.
 export function useSyncProcessingRecordings() {
   const { savedLives, updateSavedLive } = useMyContent();
 
+  // استخراج معرّفات العناصر التي تحت المعالجة كـ String ثابت
+  const processingIds = savedLives
+    .filter((l) => l.recordingStatus === "processing")
+    .map((l) => l.id)
+    .join(",");
+
   useEffect(() => {
-    const processing = savedLives.filter((l) => l.recordingStatus === "processing");
-    if (processing.length === 0) return;
+    if (!processingIds) return;
 
-    const interval = setInterval(async () => {
-      for (const live of processing) {
-        const { data } = await supabase
-          .from("lives")
-          .select("recording_status, recording_url")
-          .eq("room_name", live.roomName)
-          .maybeSingle();
+    const processingLives = savedLives.filter((l) => l.recordingStatus === "processing");
 
-        if (data && (data.recording_status === "ready" || data.recording_status === "failed")) {
-          updateSavedLive(live.id, {
-            recordingStatus: data.recording_status,
-            recordingUrl: data.recording_url ?? null,
-          });
+    // دالة الفحص التي تُنفذ فوراً وتُكرر في الـ Interval
+    const checkStatus = async () => {
+      for (const live of processingLives) {
+        try {
+          const { data, error } = await supabase
+            .from("lives")
+            .select("recording_status, recording_url")
+            .eq("room_name", live.roomName)
+            .maybeSingle();
+
+          if (error) {
+            console.error("Error fetching recording status:", error.message);
+            continue;
+          }
+
+          if (data && (data.recording_status === "ready" || data.recording_status === "failed")) {
+            updateSavedLive(live.id, {
+              recordingStatus: data.recording_status,
+              recordingUrl: data.recording_url ?? null,
+            });
+          }
+        } catch (err) {
+          console.error("Unexpected error syncing recording:", err);
         }
       }
-    }, POLL_MS);
+    };
+
+    // 1. تشغيل الفحص فوراً عند فتح الصفحة
+    checkStatus();
+
+    // 2. تشغيل الفحص كل 5 ثوانٍ
+    const interval = setInterval(checkStatus, POLL_MS);
 
     return () => clearInterval(interval);
-    // Re-run whenever the set of processing ids changes (new one started,
-    // or one just resolved and should stop being polled).
-  }, [savedLives.filter((l) => l.recordingStatus === "processing").map((l) => l.id).join(",")]);
+  }, [processingIds]); // التبعية أصبحت متغيرة نصية بسيطة وثابتة Reference-wise
 }

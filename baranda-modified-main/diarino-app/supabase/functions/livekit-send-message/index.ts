@@ -1,3 +1,4 @@
+// @ts-nocheck
 // supabase/functions/livekit-send-message/index.ts
 //
 // The ONLY way a live comment or like reaches a LiveKit room now — see

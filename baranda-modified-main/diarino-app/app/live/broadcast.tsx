@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { router } from "expo-router";
-import { View, Text, TextInput, Pressable, StyleSheet, Modal, FlatList, Alert } from "react-native";
+import { View, Text, TextInput, Pressable, StyleSheet, Modal, FlatList, Alert, Platform } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import {
   registerGlobals,
@@ -34,6 +34,12 @@ try {
 }
 
 const MAX_TITLE_WORDS = 5;
+
+// تحويل بروتوكول HTTP إلى WSS لضمان توافق اتصالات WebSockets على الموبايل والـ APK
+function formatLiveKitUrl(url: string | undefined): string {
+  if (!url) return "";
+  return url.replace(/^https:\/\//, "wss://");
+}
 
 export default function BroadcastScreen() {
   const { user } = useCurrentUser();
@@ -83,9 +89,14 @@ function BroadcastFlow() {
     try {
       await createLiveRoom(roomName, title.trim());
       setPhase("live");
-    } catch (err) {
-      setStartError(err instanceof Error ? err : new Error(String(err)));
+    } catch (err: any) {
+      const safeMessage = err instanceof Error ? err.message : String(err);
+      setStartError(new Error(safeMessage));
       setPhase("setup");
+      Alert.alert(
+        t("خطأ في بدء البث"),
+        safeMessage || t("تعذر التواصل مع خادم البث المباشر.")
+      );
     }
   }
 
@@ -133,14 +144,28 @@ function BroadcastFlow() {
   if (!ready || !info) return null;
 
   return (
-    <LiveKitRoom serverUrl={info.url} token={info.token} connect video={info.isHost} audio={info.isHost}>
+    <LiveKitRoom
+      serverUrl={formatLiveKitUrl(info.url)}
+      token={info.token}
+      connect={true}
+      video={info.isHost ?? true}
+      audio={info.isHost ?? true}
+      options={{
+        adaptiveStream: true,
+        dynacast: true,
+      }}
+      onError={(err) => {
+        console.error("LiveKit Broadcaster Connection Error:", err);
+        Alert.alert(t("خطأ في الاتصال"), t("تعذر الاتصال بسيرفر البث المباشر."));
+      }}
+    >
       <BroadcasterLiveView
         title={title}
         displayName={displayName}
         userId={user?.id ?? "me"}
         roomName={roomName}
         onEnd={() => {
-          endLiveRoom(roomName);
+          endLiveRoom(roomName).catch((err) => console.warn("Failed to end live room on backend:", err));
           router.back();
         }}
       />
@@ -148,7 +173,6 @@ function BroadcastFlow() {
   );
 }
 
-// Custom Type Guard لضمان مطابقة الأنواع وأمان التشغيل بدون any
 function isValidTrackRef(tr: unknown): tr is { participant: { isLocal: boolean }; publication?: { track?: { restartTrack?: (opts: { facingMode: string }) => Promise<void> } } } {
   return isTrackReference(tr) && typeof tr === "object" && tr !== null && "participant" in tr;
 }
@@ -163,11 +187,10 @@ function BroadcasterLiveView({
   const participants = useParticipants();
   const tracks = useTracks([Track.Source.Camera]);
 
-  // Safe track reference lookup باستخدام دالة Guard المخصصة
   const localTrackRef = tracks.find(isValidTrackRef);
 
   const { comments, sendComment } = useLiveComments(displayName);
-  const microphoneTrackRef = { participant: room.localParticipant, source: Track.Source.Microphone };
+  const microphoneTrackRef = { participant: room?.localParticipant, source: Track.Source.Microphone };
   const isMuted = useIsMuted(microphoneTrackRef);
 
   const startedAtRef = useRef(Date.now());
@@ -183,9 +206,30 @@ function BroadcasterLiveView({
   const viewers = participants.filter((p: Participant) => !p.isLocal);
 
   useEffect(() => {
-    AudioSession.startAudioSession();
-    return () => { AudioSession.stopAudioSession(); };
-  }, []);
+    let active = true;
+    (async () => {
+      try {
+        if (Platform.OS !== "web" && AudioSession?.startAudioSession) {
+          await AudioSession.startAudioSession();
+        }
+      } catch (err: any) {
+        if (active) {
+          console.warn("AudioSession start error:", err);
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+      try {
+        if (Platform.OS !== "web" && AudioSession?.stopAudioSession) {
+          AudioSession.stopAudioSession();
+        }
+      } catch (err) {
+        console.warn("AudioSession stop error:", err);
+      }
+    };
+  }, [t]);
 
   useEffect(() => {
     startRecording(roomName)
@@ -199,7 +243,11 @@ function BroadcasterLiveView({
   }, [participants.length]);
 
   function toggleMic() {
-    room?.localParticipant.setMicrophoneEnabled(isMuted);
+    try {
+      room?.localParticipant?.setMicrophoneEnabled(isMuted);
+    } catch (err: any) {
+      Alert.alert(t("خطأ الميكروفون"), err?.message || t("تعذر تغيير حالة الميكروفون."));
+    }
   }
 
   async function flipCamera() {
@@ -210,8 +258,9 @@ function BroadcasterLiveView({
     try {
       await track.restartTrack({ facingMode: next });
       setFacingMode(next);
-    } catch (err) {
+    } catch (err: any) {
       console.warn("Failed to switch camera:", err);
+      Alert.alert(t("خطأ الكاميرا"), t("تعذر تبديل الكاميرا."));
     }
   }
 
@@ -226,9 +275,14 @@ function BroadcasterLiveView({
       }
     }
 
-    finalizeSavedLive.mutate({ roomName, viewerPeak: peakViewersRef.current });
-    room?.disconnect();
-    onEnd();
+    try {
+      finalizeSavedLive.mutate({ roomName, viewerPeak: peakViewersRef.current });
+      room?.disconnect();
+    } catch (err) {
+      console.warn("Error during live disconnect:", err);
+    } finally {
+      onEnd();
+    }
   }
 
   function confirmKick(participant: { identity: string; name?: string }) {
@@ -282,7 +336,7 @@ function BroadcasterLiveView({
       </View>
 
       <View style={styles.titlePill}>
-        <Text style={styles.titlePillText}>📢 {t(title)}</Text>
+        <Text style={styles.titlePillText}>📢 {title}</Text>
       </View>
 
       <View style={styles.controlsRow}>
@@ -354,15 +408,8 @@ function BroadcasterLiveView({
   );
 }
 
-// ↔ قاعدة تثيم الوسائط (نسخة نهائية معتمدة — docs/deferred-tasks.md):
-// setupContainer وكل شاشات "قبل البث" (مفيش كاميرا شغالة لسه) + مودال
-// المشاهدين (Sheet كامل، مش مرسوم على الفيديو) بتتبع الثيم. أما
-// liveContainer/liveTopBar/titlePill/controlsRow وكل حاجة فوق الفيديو
-// نفسه أثناء البث الفعلي — دول "تراكبات على سطح الوسائط" فتفضل ثابتة
-// (أبيض/أسود + ظلال) بغض النظر عن الثيم، زي بالظبط الريلز.
 function createStyles(themeColors: ThemeColors) {
   return StyleSheet.create({
-    // ↔ يتبع الثيم — شاشات ما قبل البث
     setupContainer: { flex: 1, backgroundColor: themeColors.background, padding: 24, justifyContent: "center", gap: 10 },
     setupTitle: { color: themeColors.text, fontSize: 20, fontWeight: "900", marginBottom: 12, textAlign: "center" },
     anonBlockedText: { color: themeColors.textMuted, fontSize: 14, fontWeight: "600", textAlign: "center", lineHeight: 21, marginBottom: 8 },
@@ -379,10 +426,9 @@ function createStyles(themeColors: ThemeColors) {
     goLiveBtnDisabled: { backgroundColor: themeColors.isDark ? "#3f3f46" : "#374151" },
     goLiveBtnText: { color: "white", fontWeight: "900", fontSize: 15 },
 
-    // ↔ ثابت دائمًا — سطح الفيديو وتراكباته المباشرة (البث الفعلي)
     liveContainer: { flex: 1, backgroundColor: "#000" },
     video: { flex: 1 },
-    liveTopBar: { position: "absolute", top: 50, left: 14, right: 14, flexDirection: "row", alignItems: "center", gap: 8 },
+    liveTopBar: { position: "absolute", top: Platform.OS === "ios" ? 50 : 30, left: 14, right: 14, flexDirection: "row", alignItems: "center", gap: 8 },
     livePill: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "#ef4444", borderRadius: 999, paddingVertical: 4, paddingHorizontal: 10 },
     liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "white" },
     livePillText: { color: "white", fontSize: 11, fontWeight: "900" },
@@ -393,14 +439,13 @@ function createStyles(themeColors: ThemeColors) {
     endBtn: { marginLeft: "auto", backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 999, paddingVertical: 6, paddingHorizontal: 14 },
     endBtnText: { color: "white", fontSize: 12, fontWeight: "900" },
     titlePill: {
-      position: "absolute", top: 92, left: 14,
+      position: "absolute", top: Platform.OS === "ios" ? 92 : 72, left: 14,
       backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 12, paddingVertical: 8, paddingHorizontal: 12,
     },
     titlePillText: { color: "white", fontSize: 13, fontWeight: "900" },
     controlsRow: { position: "absolute", right: 14, bottom: 140, gap: 14, alignItems: "center" },
     controlBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(0,0,0,0.4)", alignItems: "center", justifyContent: "center" },
 
-    // ↔ يتبع الثيم — Sheet كامل، مش مرسوم على الفيديو
     modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
     viewersSheet: { backgroundColor: themeColors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, paddingBottom: 28 },
     viewersSheetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14 },
