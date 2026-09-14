@@ -1,7 +1,5 @@
 import { Platform } from "react-native";
-import * as AuthSession from "expo-auth-session";
 import * as WebBrowser from "expo-web-browser";
-import * as Linking from "expo-linking";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../supabase";
 import { queryClient } from "../queryClient";
@@ -77,19 +75,9 @@ export function getOAuthRedirectUri(): string {
     return `${window.location.origin}/auth-callback`;
   }
 
-  // 2. بيئة التطبيقات الذكية (Android / iOS / APK)
-  try {
-    const deepLink = Linking.createURL("auth-callback", { scheme: "diarino" });
-    if (deepLink) return deepLink;
-  } catch {
-    /* fallback to AuthSession if Linking fails */
-  }
-
-  return AuthSession.makeRedirectUri({
-    scheme: "diarino",
-    path: "auth-callback",
-    preferLocalhost: false,
-  });
+  // 2. تطبيقات الموبايل (Android APK / iOS Standalone)
+  // تم تمرير النص مباشرة لتفادي فحص Expo للـ Manifest في وقت التشغيل
+  return "diarino://auth-callback";
 }
 
 export async function signInWithGoogle(): Promise<{ error: string | null }> {
