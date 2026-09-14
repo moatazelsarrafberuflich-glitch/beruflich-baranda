@@ -1,4 +1,5 @@
 import { Platform } from "react-native";
+import { makeRedirectUri } from "expo-auth-session";
 import * as WebBrowser from "expo-web-browser";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../supabase";
@@ -70,14 +71,18 @@ async function completeOAuthCallbackOnce(rawUrl: string): Promise<{ error: strin
 }
 
 export function getOAuthRedirectUri(): string {
-  // 1. بيئة الويب
+  // Web OAuth must return to the host serving the current app.
   if (Platform.OS === "web" && typeof window !== "undefined" && window.location?.origin) {
     return `${window.location.origin}/auth-callback`;
   }
 
-  // 2. تطبيقات الموبايل (Android APK / iOS Standalone)
-  // تم تمرير النص مباشرة لتفادي فحص Expo للـ Manifest في وقت التشغيل
-  return "diarino://auth-callback";
+  // Native OAuth needs a URI generated from the configured app scheme. This
+  // also keeps Expo Go, development builds, and standalone builds distinct.
+  return makeRedirectUri({
+    native: "diarino://auth-callback",
+    scheme: "diarino",
+    path: "auth-callback",
+  });
 }
 
 export async function signInWithGoogle(): Promise<{ error: string | null }> {
