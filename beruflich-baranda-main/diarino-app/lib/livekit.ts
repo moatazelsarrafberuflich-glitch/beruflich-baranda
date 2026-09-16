@@ -75,7 +75,8 @@ export async function endLiveRoom(roomName: string): Promise<void> {
 }
 
 // ↔ start Egress recording & SAVE egress_id + recording_status in Supabase
-export async function startRecording(roomName: string): Promise<{ egressId: string }> {
+// (تم التحصين الكامل لمنع كراش التطبيق في حالة فشل سيرفر التسجيل)
+export async function startRecording(roomName: string): Promise<{ egressId: string } | null> {
   try {
     const { data, error } = await supabase.functions.invoke<{ egressId: string }>(
       "livekit-recording",
@@ -84,8 +85,23 @@ export async function startRecording(roomName: string): Promise<{ egressId: stri
       }
     );
 
-    if (error) throw error;
-    if (!data?.egressId) throw new Error("livekit-recording did not return an egressId");
+    if (error) {
+      console.warn("[startRecording] Edge Function error safely handled:", error);
+      await supabase
+        .from("lives")
+        .update({ recording_status: "failed" })
+        .eq("room_name", roomName);
+      return null;
+    }
+
+    if (!data?.egressId) {
+      console.warn("[startRecording] No egressId returned from recording function");
+      await supabase
+        .from("lives")
+        .update({ recording_status: "failed" })
+        .eq("room_name", roomName);
+      return null;
+    }
 
     // تحديث قاعدة البيانات بـ egress_id وحالة التسجيل "processing"
     await supabase
@@ -98,12 +114,14 @@ export async function startRecording(roomName: string): Promise<{ egressId: stri
 
     return data;
   } catch (err) {
-    // في حال فشل بدء التسجيل، يتم تسجيل الحالة كـ failed
-    await supabase
-      .from("lives")
-      .update({ recording_status: "failed" })
-      .eq("room_name", roomName);
-    throw err;
+    console.warn("[startRecording] Suppressed error to prevent app crash:", err);
+    try {
+      await supabase
+        .from("lives")
+        .update({ recording_status: "failed" })
+        .eq("room_name", roomName);
+    } catch (_) {}
+    return null; // ارجاع null بدون إعادة رمي الخطأ (No throw err)
   }
 }
 
@@ -114,7 +132,6 @@ export async function stopRecording(
   durationSec?: number
 ): Promise<void> {
   try {
-    // إذا لم يتم التمرير الصريح للـ egressId، نقوم بجلب قيمته المجهزة في قاعدة البيانات
     let targetEgressId = egressId;
     if (!targetEgressId) {
       const { data } = await supabase
@@ -135,32 +152,41 @@ export async function stopRecording(
       body: { action: "stop", roomName, egressId: targetEgressId, durationSec },
     });
 
-    if (error) throw error;
+    if (error) {
+      console.warn("Handled error stopping livekit recording:", error);
+    }
   } catch (err) {
     console.error("Error stopping livekit recording:", err);
-    // لا نرمي خطأ يوقف إغلاق الشاشة بالنسبة للمستخدم، بل يسجل في الخلفية
   }
 }
 
-// ↔ send chat or like messages to the live room
+// ↔ send chat or like messages to the live room (محصنة)
 export async function sendLiveMessage(
   roomName: string,
   type: "comment" | "like",
   text?: string
 ): Promise<void> {
-  const { error } = await supabase.functions.invoke("livekit-send-message", {
-    body: { roomName, type, text },
-  });
-  if (error) throw error;
+  try {
+    const { error } = await supabase.functions.invoke("livekit-send-message", {
+      body: { roomName, type, text },
+    });
+    if (error) console.warn("Failed to send live message:", error);
+  } catch (err) {
+    console.warn("Suppressed sendLiveMessage error:", err);
+  }
 }
 
-// ↔ kick participant (moderation)
+// ↔ kick participant (moderation) (محصنة)
 export async function kickParticipant(
   roomName: string,
   participantIdentity: string
 ): Promise<void> {
-  const { error } = await supabase.functions.invoke("livekit-moderate", {
-    body: { roomName, participantIdentity },
-  });
-  if (error) throw error;
+  try {
+    const { error } = await supabase.functions.invoke("livekit-moderate", {
+      body: { roomName, participantIdentity },
+    });
+    if (error) console.warn("Failed to kick participant:", error);
+  } catch (err) {
+    console.warn("Suppressed kickParticipant error:", err);
+  }
 }

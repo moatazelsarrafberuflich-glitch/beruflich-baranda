@@ -1,12 +1,32 @@
-// ٠) إضافة Polyfills الأساسية لبيئة Hermes (Android/APK/iOS/Web)
-// يحل مشكلة الكراش وفشل الاتصال بمكتبات Supabase و LiveKit عند البث المباشر.
-require("fast-text-encoding");
-require("web-streams-polyfill/polyfill");
+// ٠) إضافة Polyfills لـ TextDecoder و ReadableStream لبيئة Hermes (Android/APK/iOS/Web)
+// نستخدم require المباشر مع التثبيت الصريح على global و globalThis
+if (typeof global.TextDecoder === "undefined") {
+  try {
+    require("fast-text-encoding");
+  } catch (e) {
+    console.warn("[Polyfill] fast-text-encoding is missing");
+  }
+}
+
+if (
+  typeof global.ReadableStream === "undefined" ||
+  typeof globalThis.ReadableStream === "undefined"
+) {
+  try {
+    const { ReadableStream } = require("web-streams-polyfill");
+    if (ReadableStream) {
+      global.ReadableStream = ReadableStream;
+      globalThis.ReadableStream = ReadableStream;
+    }
+  } catch (err) {
+    console.warn("[Polyfill] Failed to load web-streams-polyfill:", err);
+  }
+}
 
 // نقطة دخول التطبيق الحقيقية — بتتحمّل قبل أي حاجة تانية خالص، حتى قبل
 // expo-router نفسه. راجع "main" فى package.json.
 //
-// ↔ ملحوظة حرجة عنليه الملف ده require() مش import: عبارات import فى
+// ↔ ملحوظة حرجة عن ليه الملف ده require() مش import: عبارات import فى
 // جافاسكريبت/تايبسكريبت بيتم "رفعها" (hoisted) لأعلى الملف تلقائيًا في
 // وقت التحويل (Babel) بغض النظر عن ترتيبها فى الكود — يعني لو كتبنا الملف
 // ده بـ import عادي، هيتحول لـ require() فعلي، لكن كل الـ require بتاعت
@@ -15,7 +35,7 @@ require("web-streams-polyfill/polyfill");
 // لازم ترقيع DOMException يحصل، وبعدين registerGlobals()، *قبل* ما
 // "expo-router/entry" يتحمّل — مش العكس. require() العادية (زي تحت)
 // بتتنفذ فى مكانها بالظبط، بالترتيب اللي مكتوبة بيه، فمفيش أي مفاجآت.
-//
+
 // ١) ترقيع DOMException لـ Hermes — منقول من app/_layout.tsx القديم.
 // livekit-client بيرجع DOMException فى أكتر من ١٧ مكان جواه (عبر كود
 // webrtc-adapter المدمج فيه)، وHermes مفيهوش DOMException كـ global
@@ -42,16 +62,6 @@ if (typeof global.DOMException === "undefined") {
 // مكوّن ممكن يستورد livekit-client بشكل مباشر أو غير مباشر). توثيق
 // LiveKit الرسمي وكل أمثلتها مع Expo Router بتنص إن registerGlobals()
 // "لازم تتنادى قبل ما الـ router أو الـ root component يتحملوا خالص".
-//
-// قبل كده كان الاستدعاء ده فى app/_layout.tsx — لكن package.json كان
-// فيه "main": "expo-router/entry" مباشرة، يعني الراوتر نفسه (وكل حاجة
-// بيحمّلها قبل ما يوصل لـ _layout.tsx) كان بيتحمّل *الأول*. ده كان
-// سبب استمرار نفس الكراش المشاهَد فى الأجهزة الحقيقية رغم نقل
-// registerGlobals() لـ _layout.tsx:
-//   "[LiveKit] webrtcRegisterGlobals() threw: Requiring unknown module 'undefined'"
-//   ثم لاحقًا: "TypeError: Cannot read property 'prototype' of undefined"
-// عند محاولة الاتصال بالغرفة — وهو تحديدًا اللي كان بيمنع الـ engine من
-// الوصول لحالة "connected" ويسبب فشل تبديل الكاميرا/الميكروفون.
 //
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { registerGlobals } = require("./lib/livekit-platform");
